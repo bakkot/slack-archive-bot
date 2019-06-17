@@ -5,9 +5,28 @@ let WebSocket = require('ws');
 
 let { oauthToken, botToken, botUserId } = require('./keys.json');
 
+// things we _actually_ ignore
 let ignoredMessageTypes = new Set([
   'hello',
+  'user_typing',
 ]);
+
+// things we handle only by logging the event to disk
+let loggedMessageTypes = new Set([
+  'file_shared',
+  'file_public',
+]);
+
+/*
+TODO;
+
+actually log things
+handle channel renames
+handle files - append <attached file 'ts-name.ext'>, and save file to disk
+  probably in distinct "files" directory
+write non-ignored events to disk
+
+*/
 
 
 (async () => {
@@ -17,29 +36,46 @@ let ignoredMessageTypes = new Set([
     then go!
   */
 
-  let channels = collectAsyncIterable(
-    getPaginated(Slack.conversations.list, { token: botToken }, res => res.channels)
-  );
-  await Promise.all(
-    channels
-      .filter(c => !c.is_member)
-      .map(c => Slack.channels.invite({ token: oauthToken, channel: c.id, user: botUserId }))
-  );
+  // let channels = collectAsyncIterable(
+  //   getPaginated(Slack.conversations.list, { token: botToken }, res => res.channels)
+  // );
+  // await Promise.all(
+  //   channels
+  //     .filter(c => !c.is_member)
+  //     .map(c => Slack.channels.invite({ token: oauthToken, channel: c.id, user: botUserId }))
+  // );
 
 
-  return;
+  // return;
 
 
   let result = await Slack.rtm.connect({ token: botToken });
   let rtmURL = result.url;
   let ws = new WebSocket(rtmURL);
+  let timeout = null;
+  function heartbeat() {
+    console.log('ping', new Date);
+    clearTimeout(timeout);
+    timeout = setTimeout(() => {
+      console.error('lost connection');
+      ws.terminate();
+    }, 5 * 60 * 1000); // observationally Slack's pings come at 4-minute intervals
+  }
+
   ws.on('open', () => {
     console.log('opened!');
+    heartbeat();
   });
+  ws.on('ping', heartbeat);
+  ws.on('close', () => { clearTimeout(timeout); });
   ws.on('message', async m => {
     try {
       m = JSON.parse(m);
       if (ignoredMessageTypes.has(m.type)) {
+        return;
+      }
+      // TODO write to disk
+      if (loggedMessageTypes.has(m.type)) {
         return;
       }
 
@@ -57,8 +93,6 @@ let ignoredMessageTypes = new Set([
       console.error(e);
     }
   });
-
-
 })();
 
 let limit = 100;
