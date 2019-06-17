@@ -24,7 +24,8 @@ class LogFile {
       return LogFile.extant.get(normal);
     }
     let instance = new LogFile(normal);
-    LogFile.extant.set(normal, instance);
+    let onReady;
+    LogFile.extant.set(normal, new Promise(resolve => { onReady = resolve; }));
     if (fs.existsSync(normal)) {
       let content = (await fs.promises.readFile(normal, 'utf8')).split('\n');
       if (content.length > 0 && content[content.length - 1] === '') {
@@ -47,7 +48,8 @@ class LogFile {
         instance.lines.set(id, lines.join('\n'));
       }
     }
-    console.log(JSON.stringify([...instance.lines]));
+    // console.log(JSON.stringify([...instance.lines]));
+    Promise.resolve().then(() => { onReady(instance); }); // the Promise.resolve() is so that things happen in the right order
     return instance;
   }
 
@@ -104,4 +106,8 @@ class LogFile {
   }
 }
 
-module.exports = LogFile;
+async function getLogFile(path) {
+  return LogFile.open(path);
+}
+
+module.exports = getLogFile;
