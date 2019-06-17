@@ -25,6 +25,7 @@ let loggedMessageTypes = new Set([
   'file_shared',
   'file_public',
   'channel_joined',
+  'channel_left',
   'member_joined_channel',
 ]);
 
@@ -111,7 +112,6 @@ function tsToFileAndId(ts) {
         break;
       }
       case 'channel_join': {
-        console.log('join');
         break;
       }
       case 'message_deleted': {
@@ -128,8 +128,7 @@ function tsToFileAndId(ts) {
         break;
       }
       default: {
-        console.error('unknown message type ' + messageObj.subtype);
-        console.log(messageObj);
+        console.error('unknown message type ' + messageObj.subtype, messageObj);
       }
     }
   }
@@ -155,10 +154,8 @@ function tsToFileAndId(ts) {
       .map(async c => {
         channelMap.set(c.id, c.name);
         if (!c.is_member) {
-          return;
-          // await Slack.channels.invite({ token: oauthToken, channel: c.id, user: botUserId });
+          await Slack.channels.invite({ token: oauthToken, channel: c.id, user: botUserId });
         }
-        if (c.name !== 'foo') return; // todo
         let dir = path.join(logDir, '#' + c.name);
         await fs.promises.mkdir(dir, { recursive: true });
         let oldest = '1000000000.000000'; // the API complains if you give it time 0
@@ -242,23 +239,26 @@ function tsToFileAndId(ts) {
       }
 
       switch (m.type) {
-        // todo edits
         case 'channel_created': {
           channelMap.set(m.channel.id, m.channel.name);
           await Slack.channels.invite({ token: oauthToken, channel: m.channel.id, user: botUserId });
           break;
         }
-        default: {
-          console.log('got message');
+        case 'message': {
+          console.log('got message of type ' + (m.subtype ? m.subtype : 'message'));
           if (!channelMap.has(m.channel)) {
-            console.error('missing channel info for ' + m.channel);
+            console.error('missing channel info for ' + m.channel, m);
             return;
           }
           await saveMessage(channelMap.get(m.channel), m);
+          break;
+        }
+        default: {
+          console.error('unknown event type ' + m.type, m);
         }
       }
     } catch (e) {
-      console.error(e);
+      console.error('error', e);
     }
   });
 })();
