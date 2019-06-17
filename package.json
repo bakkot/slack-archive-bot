@@ -1,6 +1,7 @@
 {
   "private": true,
   "dependencies": {
+    "follow-redirects": "^1.7.0",
     "slack": "^11.0.2",
     "ws": "^7.0.0"
   }

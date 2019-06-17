@@ -4,12 +4,14 @@ let Slack = require('slack');
 let WebSocket = require('ws');
 let fs = require('fs');
 let path = require('path');
+let https = require('follow-redirects').https; // bleh
 
 let getLogFile = require('./logfile.js');
 
 let { oauthToken, botToken, botUserId } = require('./keys.json');
 
 let logDir = 'logs';
+let filesDir = 'logs/files';
 
 // things we _actually_ ignore
 let ignoredMessageTypes = new Set([
@@ -30,8 +32,8 @@ let loggedMessageTypes = new Set([
 TODO;
 
 handle channel renames
-save files
 write non-ignored events to disk
+
 */
 
 
@@ -63,7 +65,7 @@ function tsToFileAndId(ts) {
       }
     }
     for (let file of files) {
-      text += ` <attached file '${file.timestamp}-${file.name}'>`;
+      text += ` <file '${file.timestamp}-${file.name}'>`;
     }
     return text;
   }
@@ -80,6 +82,32 @@ function tsToFileAndId(ts) {
         let { file, id } = tsToFileAndId(messageObj.ts);
         let log = await getLogFile(path.join(dir, file));
         await log.addLine(id, text);
+
+        if (messageObj.upload) {
+          for (let file of messageObj.files) {
+            if (file.mode !== 'hosted') {
+              console.error('cannot handle non-hosted file', file);
+              continue;
+            }
+            let dest = path.join(filesDir, file.timestamp + '-' + file.name);
+            if (fs.existsSync(dest)) {
+              continue; // assume we've gotten it already somehow
+            }
+            await new Promise((resolve, reject) => {
+              https.get(file.url_private, { headers: { Authorization: 'Bearer ' + oauthToken } }, res => {
+                let file = fs.createWriteStream(dest);
+                file.on('finish', () => { resolve(); });
+                res.on('error', async e => {
+                  try {
+                    await fs.promises.unlink(dest);
+                  } catch {}
+                  reject(e);
+                });
+                res.pipe(file);
+              });
+            });
+          }
+        }
         break;
       }
       case 'channel_join': {
@@ -104,14 +132,10 @@ function tsToFileAndId(ts) {
         console.log(messageObj);
       }
     }
-    if (messageObj.upload) {
-      // todo save them. maybe in background?
-    }
-
-
   }
 
   await fs.promises.mkdir(logDir, { recursive: true });
+  await fs.promises.mkdir(filesDir, { recursive: true });
 
 
   let users = await collectAsyncIterable(
