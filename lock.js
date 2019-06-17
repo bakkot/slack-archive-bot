@@ -48,30 +48,4 @@ function makeLock() {
   };
 };
 
-/*
-This isn't really a part of the lock impl, but nice in our use case.
-As above, except keyed.
-
-Use:
-let locks = makeLockSet();
-
-...
-
-let done = await locks('some key');
-
-...
-
-done();
-*/
-function makeLockSet() {
-  // poor man's extremely-limited-interface DefaultMap
-  let map = new Map;
-  return key => {
-    if (!map.has(key)) {
-      map.set(makeLock());
-    }
-    return map.get(key)();
-  };
-}
-
-module.exports = { makeLock, makeLockSet };
+module.exports = { makeLock };

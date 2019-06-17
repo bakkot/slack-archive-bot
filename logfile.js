@@ -5,8 +5,6 @@ let fs = require('fs');
 
 let { makeLock } = require('./lock.js');
 
-// let id = `${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}.${frac}`;
-
 class LogFile {
   static extant = new Map;
   lock = makeLock();
@@ -48,7 +46,6 @@ class LogFile {
         instance.lines.set(id, lines.join('\n'));
       }
     }
-    // console.log(JSON.stringify([...instance.lines]));
     Promise.resolve().then(() => { onReady(instance); }); // the Promise.resolve() is so that things happen in the right order
     return instance;
   }
@@ -86,7 +83,6 @@ class LogFile {
       this.stream = null;
     }
     if (content === null) {
-      // i.e. delete
       this.lines.delete(id);
     } else {
       this.lines.set(id, content);

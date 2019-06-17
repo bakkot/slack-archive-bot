@@ -34,7 +34,6 @@ TODO;
 
 handle channel renames
 write non-ignored events to disk
-
 */
 
 
@@ -137,6 +136,9 @@ function tsToFileAndId(ts) {
   await fs.promises.mkdir(filesDir, { recursive: true });
 
 
+  // ----------------------------------------------------------------
+  // get users, get channels, join channels, catch up on history
+
   let users = await collectAsyncIterable(
     getPaginated(Slack.users.list, { token: botToken }, res => res.members)
   );
@@ -207,6 +209,8 @@ function tsToFileAndId(ts) {
       })
   );
 
+  // ----------------------------------------------------------------
+  // start listening!
 
   let result = await Slack.rtm.connect({ token: botToken });
   let rtmURL = result.url;
