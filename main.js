@@ -113,6 +113,8 @@ let ignoredEventTypes = new Set([
         case 'channel_created': {
           meta.channelMap.set(m.channel.id, m.channel.name);
           await Slack.channels.invite({ token: oauthToken, channel: m.channel.id, user: botUserId });
+          let dir = path.join(logDir, '#' + m.channel.name);
+          await fs.promises.mkdir(dir, { recursive: true });
           break;
         }
         case 'message': {
