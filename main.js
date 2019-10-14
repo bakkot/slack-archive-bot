@@ -15,12 +15,15 @@ let path = require('path');
 let https = require('follow-redirects').https; // bleh
 
 let getLogFile = require('./logfile.js');
+let lockGroup = require('./lockgroup.js');
+
 
 let { oauthToken, botToken, botUserId } = require('./keys.json');
 
 
 let logDir = 'logs';
 let filesDir = 'logs/files';
+let docsDir = 'logs/docs';
 
 let ignoredEventTypes = new Set([
   'hello',
@@ -28,9 +31,11 @@ let ignoredEventTypes = new Set([
   'desktop_notification',
 ]);
 
+
 (async () => {
   await fs.promises.mkdir(logDir, { recursive: true });
   await fs.promises.mkdir(filesDir, { recursive: true });
+  await fs.promises.mkdir(docsDir, { recursive: true });
 
 
   // ----------------------------------------------------------------
@@ -127,6 +132,10 @@ let ignoredEventTypes = new Set([
           await saveMessage(meta, meta.channelMap.get(m.channel), m);
           break;
         }
+        case 'file_change': {
+          await getFile(m.file_id);
+          break;
+        }
         default: {
           console.error('unknown event type ' + m.type, m);
         }
@@ -179,16 +188,33 @@ function tsToFileAndId(ts) {
 }
 
 function fixupMessage(meta, userId, origText, files) {
-  let text = `<${meta.userMap.has(userId) ? meta.userMap.get(userId) : userId}> ${origText}`;
-  if (text.includes('<@U')) {
-    for (let [id, name] of meta.userMap) {
-      text = text.replace(new RegExp('<@' + toRegExp(id) + '>', 'g'), '@' + name);
+  let parts = [`<${meta.userMap.has(userId) ? meta.userMap.get(userId) : userId}>`];
+  if (origText !== '') {
+    if (origText.includes('<@U')) {
+      for (let [id, name] of meta.userMap) {
+        origText = origText.replace(new RegExp('<@' + toRegExp(id) + '>', 'g'), '@' + name);
+      }
     }
+    parts.push(origText);
   }
   for (let file of files) {
-    text += ` <file '${file.timestamp}-${file.name}'>`;
+    switch (file.mode) {
+      case 'snippet':
+      case 'hosted': {
+        parts.push(`<file '${file.timestamp}-${file.name}'>`);
+        break;
+      }
+      case 'docs': {
+        parts.push(`<doc ${file.id}, titled "${file.title}">`);
+        break;
+      }
+      default: {
+        parts.push(`<unknown file>`);
+        console.error('cannot render non-hosted file of type ' + file.mode, file);
+      }
+    }
   }
-  return text;
+  return parts.join(' ');
 }
 
 async function saveMessage(meta, channelName, messageObj) {
@@ -202,34 +228,31 @@ async function saveMessage(meta, channelName, messageObj) {
       break;
     }
     case void 0: {
-      let text = fixupMessage(meta, messageObj.user, messageObj.text, messageObj.upload ? messageObj.files : []);
+      let text = fixupMessage(meta, messageObj.user, messageObj.text, Array.isArray(messageObj.files) ? messageObj.files : []);
       let { file, id } = tsToFileAndId(messageObj.ts);
       let log = await getLogFile(path.join(dir, file));
       await log.addLine(id, text);
 
-      if (messageObj.upload) {
+      if (Array.isArray(messageObj.files)) {
         for (let file of messageObj.files) {
-          if (file.mode !== 'hosted') {
-            console.error('cannot handle non-hosted file', file);
-            continue;
+          switch (file.mode) {
+            case 'snippet':
+            case 'hosted': {
+              let dest = path.join(filesDir, file.timestamp + '-' + file.name);
+              if (fs.existsSync(dest)) {
+                continue; // assume we've gotten it already somehow
+              }
+              await download(file.url_private, dest, oauthToken);
+              break;
+            }
+            case 'docs': {
+              await getFile(file.id);
+              break;
+            }
+            default: {
+              console.error('cannot handle non-hosted file of type ' + file.mode, file);
+            }
           }
-          let dest = path.join(filesDir, file.timestamp + '-' + file.name);
-          if (fs.existsSync(dest)) {
-            continue; // assume we've gotten it already somehow
-          }
-          await new Promise((resolve, reject) => {
-            https.get(file.url_private, { headers: { Authorization: 'Bearer ' + oauthToken } }, res => {
-              let file = fs.createWriteStream(dest);
-              file.on('finish', () => { resolve(); });
-              res.on('error', async e => {
-                try {
-                  await fs.promises.unlink(dest);
-                } catch {}
-                reject(e);
-              });
-              res.pipe(file);
-            });
-          });
         }
       }
       break;
@@ -251,6 +274,58 @@ async function saveMessage(meta, channelName, messageObj) {
       console.error('unknown message type ' + messageObj.subtype, messageObj);
     }
   }
+}
+
+let docLock = lockGroup();
+async function getFile(id) {
+  let done = await docLock(id);
+  try {
+    let meta = await Slack.files.info({ token: botToken, file: id });
+    // note: file comments went away in 2018; we don't bother with them here
+
+    if (!meta.ok) {
+      throw new Error('failed to get info on file ' + id + ': ' + meta.error);
+    }
+    let file = meta.file;
+
+    if (typeof file.url_private !== 'string') {
+      throw new Error('file ' + id + ' lacks url');
+    }
+
+    let baseName = path.join(docsDir, id);
+    await fs.promises.writeFile(baseName + '-meta.json', JSON.stringify(file, null, '  '), 'utf8');
+    await download(file.url_private, baseName + '.txt', oauthToken);
+
+    let content = await fs.promises.readFile(baseName + '.txt', 'utf8');
+    if (content !== '') {
+      try {
+        let full = JSON.parse(content).full;
+        if (typeof full === 'string') {
+          await fs.promises.writeFile(baseName + '-rendered.html', full, 'utf8');
+        }
+      } catch (e) {
+        // pass
+      }
+    }
+  } finally {
+    done();
+  }
+}
+
+function download(url, filename, token) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: { Authorization: 'Bearer ' + token } }, res => {
+      let file = fs.createWriteStream(filename);
+      file.on('finish', () => { resolve(); });
+      res.on('error', async e => {
+        try {
+          await fs.promises.unlink(filename);
+        } catch {}
+        reject(e);
+      });
+      res.pipe(file);
+    });
+  });
 }
 
 async function getLastTimestamp(dir) {
