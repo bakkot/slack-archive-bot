@@ -173,7 +173,7 @@ function tsToFileAndId(ts) {
   let [whole, part] = ts.split('.');
   whole = +whole * 1000;
   let date = new Date(whole);
-  let file = date.getFullYear().toString().padStart(4, '0') + '-' + date.getMonth().toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0') + '.txt';
+  let file = date.getFullYear().toString().padStart(4, '0') + '-' + (date.getMonth() + 1).toString().padStart(2, '0') + '-' + date.getDate().toString().padStart(2, '0') + '.txt';
   let id = date.getHours().toString().padStart(2, '0') + ':' + date.getMinutes().toString().padStart(2, '0') + ':' + date.getSeconds().toString().padStart(2, '0') + '.' + part;
   return { file, id };
 }
@@ -271,7 +271,7 @@ async function getLastTimestamp(dir) {
   let latestFile = files[files.length - 1];
   let [year, month, day] = latestFile.slice(0, -4).split('-').map(p => +p);
   date.setYear(year);
-  date.setMonth(month);
+  date.setMonth(month - 1);
   date.setDate(day);
   let latestLog = await getLogFile(path.join(dir, latestFile));
   let keys = [...latestLog.lines.keys()];
